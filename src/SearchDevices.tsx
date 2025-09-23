@@ -1,30 +1,49 @@
-import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { fetchDevices, fetchProperties } from "./fetch";
-import useProgressiveLoad from "./useProgressiveLoad";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { memo, useMemo, useState } from "react";
+import {
+  type Device,
+  fetchDevices,
+  fetchProperties,
+  type Property,
+} from "./fetch";
 
 export default function SearchDevices() {
   const properties = useQuery(fetchProperties());
 
-  const devices = useProgressiveLoad(
-    properties.data?.map((property) => fetchDevices(property.id)) || [],
-  );
+  const devices = useQueries({
+    queries:
+      properties.data?.map((property) => fetchDevices(property.id)) || [],
+  });
 
   const [searchText, setSearchText] = useState("1");
 
-  const results = useMemo(
-    () =>
-      devices.data.flatMap(
-        (device, i) =>
-          device?.data
-            ?.filter((x) => x.name.includes(searchText))
-            .map((device) => ({
-              device,
-              property: properties.data?.[i],
-            })) ?? [],
-      ),
-    [devices.data, properties.data, searchText],
-  );
+  const results = useMemo(() => {
+    const search = searchText.trim().toLowerCase();
+    if (!search) {
+      return [];
+    }
+
+    return devices.flatMap((deviceQuery, i) => {
+      const devices = deviceQuery?.data ?? [];
+
+      return (
+        devices
+          .filter((x) => x.name.toLowerCase().includes(searchText))
+          .map((device) => ({
+            device,
+            property: properties.data?.[i],
+          })) ?? []
+      );
+    });
+  }, [devices, properties.data, searchText]);
+
+  const total = devices.length;
+  const fetched = devices.filter(
+    (q) => q.data !== undefined && !q.isStale,
+  ).length;
+
+  const devicesLoading =
+    fetched < total || devices.some((x) => x.isFetching || x.isPending);
 
   return (
     <div>
@@ -39,9 +58,9 @@ export default function SearchDevices() {
       <div>
         {properties.isLoading ? (
           <em>Loading...</em>
-        ) : devices.loading ? (
+        ) : devicesLoading ? (
           <em>
-            Loading ({devices.fetched}/{devices.count})
+            Loading ({fetched}/{total})
           </em>
         ) : null}
       </div>
@@ -53,12 +72,24 @@ export default function SearchDevices() {
           <em>No results</em>
         ) : (
           results.map(({ device, property }) => (
-            <div key={device.id}>
-              {device.name} ({property?.name ?? "..."})
-            </div>
+            <SearchResultItem
+              key={device.id}
+              device={device}
+              property={property}
+            />
           ))
         )}
       </div>
     </div>
   );
 }
+
+const SearchResultItem = memo(
+  ({ device, property }: { device: Device; property?: Property }) => {
+    return (
+      <div>
+        {device.name} ({property?.name ?? "..."})
+      </div>
+    );
+  },
+);
